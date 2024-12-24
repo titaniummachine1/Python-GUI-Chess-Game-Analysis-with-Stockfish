@@ -7,6 +7,7 @@ import os
 from engine import ChessEngine
 from move_history import MoveHistory
 from navigation import Navigation
+import math
 
 
 class ChessAnalyzerApp:
@@ -91,28 +92,39 @@ class ChessAnalyzerApp:
         col = x // 50
         row = 7 - (y // 50)
         square = chess.square(col, row)
-
+        move = chess.Move(self.selected_square, square)
+    
         if self.selected_square is None:
             if self.board.piece_at(square):
                 self.selected_square = square
         else:
-            move = chess.Move(self.selected_square, square)
             if move in self.board.legal_moves:
                 self.board.push(move)
-                self.selected_square = None
-                self.refresh_board()
-                self.analyze_current_position()
-                self.move_history.update(self.board.move_stack)
-                self.update_analysis_bar()
+                self.selected_square = None  # Deselect after a valid move
+                self.analyze_current_position()  # Update analysis
+                self.move_history.update(self.board.move_stack)  # Update move history
+                self.update_analysis_bar()  # Update analysis bar
             else:
-                self.selected_square = None
+                if self.board.piece_at(square):
+                    self.selected_square = square
+                else:
+                    self.selected_square = None
+    
+        self.refresh_board()  # Refresh to show updates
+
 
     def analyze_current_position(self):
         analysis = self.engine.analyze(self.board)
         self.analysis_area.delete(1.0, tk.END)
         if self.board.move_stack:
             self.analysis_area.insert(tk.END, f"Move: {self.board.peek()}\n")
-        self.analysis_area.insert(tk.END, f"Score: {analysis['score']}\n")
+        
+        score = analysis['score']
+        if self.board.turn == chess.BLACK:
+            score = -score  # Invert score if it's black's turn
+    
+        scaled_score = score / 100  # Scale the score to pawns
+        self.analysis_area.insert(tk.END, f"Score: {scaled_score:.2f}\n")
         if "pv" in analysis:
             self.analysis_area.insert(tk.END, f"Best Move: {analysis['pv'][0]}\n\n")
 
@@ -123,11 +135,57 @@ class ChessAnalyzerApp:
             x1, y1 = col * 50, (7 - row) * 50
             x2, y2 = x1 + 50, y1 + 50
             color = "#F0D9B5" if (col + row) % 2 == 0 else "#B58863"
-            self.board_canvas.create_rectangle(x1, y1, x2, y2, fill=color)
+            self.board_canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
+    
             piece = self.board.piece_at(square)
             if piece:
                 piece_image = self.piece_images[piece.symbol()]
                 self.board_canvas.create_image(x1, y1, anchor=tk.NW, image=piece_image)
+    
+        # Highlight the previous move (if any)
+        if len(self.board.move_stack) > 0:
+            last_move = self.board.move_stack[-1]
+            from_square = last_move.from_square
+            to_square = last_move.to_square
+    
+            from_col, from_row = chess.square_file(from_square), chess.square_rank(from_square)
+            to_col, to_row = chess.square_file(to_square), chess.square_rank(to_square)
+    
+            from_x1, from_y1 = from_col * 50, (7 - from_row) * 50
+            from_x2, from_y2 = from_x1 + 50, from_y1 + 50
+            to_x1, to_y1 = to_col * 50, (7 - to_row) * 50
+            to_x2, to_y2 = to_x1 + 50, to_y1 + 50
+    
+            self.board_canvas.create_rectangle(from_x1, from_y1, from_x2, from_y2, fill="#FFD700", outline="", stipple="gray50")
+            self.board_canvas.create_rectangle(to_x1, to_y1, to_x2, to_y2, fill="#FFFF00", outline="", stipple="gray50")
+    
+        # Highlight the suggested move (if any)
+        analysis = self.engine.analyze(self.board)
+        if "pv" in analysis:
+            suggested_move = analysis["pv"][0]
+            from_square = suggested_move.from_square
+            to_square = suggested_move.to_square
+    
+            from_col, from_row = chess.square_file(from_square), chess.square_rank(from_square)
+            to_col, to_row = chess.square_file(to_square), chess.square_rank(to_square)
+    
+            from_x1, from_y1 = from_col * 50, (7 - from_row) * 50
+            from_x2, from_y2 = from_x1 + 50, from_y1 + 50
+            to_x1, to_y1 = to_col * 50, (7 - to_row) * 50
+            to_x2, to_y2 = to_x1 + 50, to_y1 + 50
+    
+            self.board_canvas.create_rectangle(from_x1, from_y1, from_x2, from_y2, fill="#00FF00", outline="", stipple="gray50")
+            self.board_canvas.create_rectangle(to_x1, to_y1, to_x2, to_y2, fill="#00FF00", outline="", stipple="gray50")
+    
+        # Highlight the selected square (if any)
+        if self.selected_square is not None:
+            col, row = chess.square_file(self.selected_square), chess.square_rank(self.selected_square)
+            x1, y1 = col * 50, (7 - row) * 50
+            x2, y2 = x1 + 50, y1 + 50
+            self.board_canvas.create_rectangle(
+                x1, y1, x2, y2, fill="#FFFF00", outline="", stipple="gray50"
+            )
+
 
     def load_piece_images(self):
         piece_symbols = {
@@ -171,43 +229,56 @@ class ChessAnalyzerApp:
             self.analyze_current_position()
             self.move_history.update(self.board.move_stack)
             self.update_analysis_bar()
-
+    
     def update_analysis_bar(self):
         analysis = self.engine.analyze(self.board)
         score = analysis["score"]
-
-        if isinstance(score, int):
-            # Handle integer score directly from Stockfish
-            normalized_score = score / 100  # Adjust as per Stockfish score range
-        else:
-            # Handle score object from Stockfish
-            normalized_score = score.relative.score()
-
-        max_score = 10  # Adjust maximum score based on Stockfish output
-        if normalized_score > 1:
-            normalized_score = 1
-        elif normalized_score < -1:
-            normalized_score = -1
-
+    
+        if self.board.turn == chess.BLACK:
+            score = -score  # Invert score if it's black's turn
+    
+        scaled_score = score / 100  # Scale the score to pawns
+    
+        # Apply more gradual exponential scaling
+        def gradual_exponential_scale(score):
+            if score >= 0:
+                return 1 - math.exp(-score / 3)  # Adjust the divisor to control scaling
+            else:
+                return -1 + math.exp(score / 3)  # Adjust the divisor to control scaling
+    
+        scaled_score = gradual_exponential_scale(scaled_score)
+    
+        # Cap the scaled score to be within the range [-1, 1]
+        if scaled_score > 1:
+            scaled_score = 1
+        elif scaled_score < -1:
+            scaled_score = -1
+    
         # Calculate percentages of advantage for white and black
-        white_percentage = (normalized_score + 1) * 50
+        white_percentage = (scaled_score + 1) * 50
         black_percentage = 100 - white_percentage
-
+    
         # Clear existing bar
         self.analysis_bar.delete("all")
-
+    
         # Draw white and black sections of the bar
         self.analysis_bar.create_rectangle(
-            0, 0, 20, white_percentage * 4, fill="#FFFFFF", outline=""
+            0, 400 - white_percentage * 4, 20, 400, fill="#FFFFFF", outline=""
         )
         self.analysis_bar.create_rectangle(
-            0, white_percentage * 4, 20, 400, fill="#000000", outline=""
+            0, 0, 20, 400 - white_percentage * 4, fill="#000000", outline=""
         )
-
-        # Optionally, draw a divider line (uncomment if needed)
-        # self.analysis_bar.create_line(0, 200, 20, 200, fill="gray")
-
-        self.analysis_bar.update()
+    
+        # Handle mate situation
+        if abs(score) >= 10000:  # Assuming a score of 10000 or more indicates mate
+            if score > 0:
+                self.analysis_bar.create_rectangle(
+                    0, 0, 20, 400, fill="#FFFFFF", outline=""
+                )
+            else:
+                self.analysis_bar.create_rectangle(
+                    0, 0, 20, 400, fill="#000000", outline=""
+                )
 
 
 if __name__ == "__main__":
