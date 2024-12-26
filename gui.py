@@ -8,6 +8,7 @@ from move_history import MoveHistory
 from navigation import Navigation
 import math
 from move_gen import MoveGen
+import chess.engine  # Import chess.engine to catch engine errors
 
 
 class ChessAnalyzerApp:
@@ -154,7 +155,7 @@ class ChessAnalyzerApp:
                 self.selected_square = square
                 self.highlight_legal_moves(square)
         else:
-            if self.move_gen.is_custom_legal_move(move):
+            if self.move_gen.is_legal_drawback_move(move):
                 self.board.push(move)
                 self.selected_square = None  # Deselect after a valid move
                 self.analyze_current_position()  # Update analysis
@@ -189,19 +190,22 @@ class ChessAnalyzerApp:
         self.reset_board()
 
     def analyze_current_position(self):
-        analysis = self.engine.analyze(self.board)
-        self.analysis_area.delete(1.0, tk.END)
-        if self.board.move_stack:
-            self.analysis_area.insert(tk.END, f"Move: {self.board.peek()}\n")
+        try:
+            analysis = self.engine.analyze(self.board)
+            self.analysis_area.delete(1.0, tk.END)
+            if self.board.move_stack:
+                self.analysis_area.insert(tk.END, f"Move: {self.board.peek()}\n")
+            
+            score = analysis['score']
+            if self.board.turn == chess.BLACK:
+                score = -score  # Invert score if it's black's turn
         
-        score = analysis['score']
-        if self.board.turn == chess.BLACK:
-            score = -score  # Invert score if it's black's turn
-    
-        scaled_score = score / 100  # Scale the score to pawns
-        self.analysis_area.insert(tk.END, f"Score: {scaled_score:.2f}\n")
-        if "pv" in analysis:
-            self.analysis_area.insert(tk.END, f"Best Move: {analysis['pv'][0]}\n\n")
+            scaled_score = score / 100  # Scale the score to pawns
+            self.analysis_area.insert(tk.END, f"Score: {scaled_score:.2f}\n")
+            if "pv" in analysis:
+                self.analysis_area.insert(tk.END, f"Best Move: {analysis['pv'][0]}\n\n")
+        except (chess.IllegalMoveError, chess.engine.EngineError, TimeoutError) as e:
+            print(f"Engine analysis error: {e}")
 
     def refresh_board(self):
         self.board_canvas.delete("all")
@@ -240,25 +244,28 @@ class ChessAnalyzerApp:
             self.board_canvas.create_rectangle(to_x1, to_y1, to_x2, to_y2, fill="#FFFF00", outline="", stipple="gray50")
     
         # Highlight the suggested move (if any)
-        analysis = self.engine.analyze(self.board)
-        if "pv" in analysis:
-            suggested_move = analysis["pv"][0]
-            from_square = suggested_move.from_square
-            to_square = suggested_move.to_square
-    
-            from_col, from_row = chess.square_file(from_square), chess.square_rank(from_square)
-            to_col, to_row = chess.square_file(to_square), chess.square_rank(to_square)
-            if self.board_flipped:
-                from_col, from_row = 7 - from_col, 7 - from_row
-                to_col, to_row = 7 - to_col, 7 - to_row
-    
-            from_x1, from_y1 = from_col * 50, (7 - from_row) * 50
-            from_x2, from_y2 = from_x1 + 50, from_y1 + 50
-            to_x1, to_y1 = to_col * 50, (7 - to_row) * 50
-            to_x2, to_y2 = to_x1 + 50, to_y1 + 50
-    
-            self.board_canvas.create_rectangle(from_x1, from_y1, from_x2, from_y2, fill="#00FF00", outline="", stipple="gray50")
-            self.board_canvas.create_rectangle(to_x1, to_y1, to_x2, to_y2, fill="#00FF00", outline="", stipple="gray50")
+        try:
+            analysis = self.engine.analyze(self.board)
+            if "pv" in analysis:
+                suggested_move = analysis["pv"][0]
+                from_square = suggested_move.from_square
+                to_square = suggested_move.to_square
+        
+                from_col, from_row = chess.square_file(from_square), chess.square_rank(from_square)
+                to_col, to_row = chess.square_file(to_square), chess.square_rank(to_square)
+                if self.board_flipped:
+                    from_col, from_row = 7 - from_col, 7 - from_row
+                    to_col, to_row = 7 - to_col, 7 - to_row
+        
+                from_x1, from_y1 = from_col * 50, (7 - from_row) * 50
+                from_x2, from_y2 = from_x1 + 50, from_y1 + 50
+                to_x1, to_y1 = to_col * 50, (7 - to_row) * 50
+                to_x2, to_y2 = to_x1 + 50, to_y1 + 50
+        
+                self.board_canvas.create_rectangle(from_x1, from_y1, from_x2, from_y2, fill="#00FF00", outline="", stipple="gray50")
+                self.board_canvas.create_rectangle(to_x1, to_y1, to_x2, to_y2, fill="#00FF00", outline="", stipple="gray50")
+        except (chess.IllegalMoveError, chess.engine.EngineError, TimeoutError) as e:
+            print(f"Engine analysis error: {e}")
     
         # Highlight the selected square (if any)
         if self.selected_square is not None:
@@ -318,63 +325,65 @@ class ChessAnalyzerApp:
             self.update_analysis_bar()
     
     def update_analysis_bar(self):
-        analysis = self.engine.analyze(self.board)
-        score = analysis["score"]
-    
-        if self.board.turn == chess.BLACK:
-            score = -score  # Invert score if it's black's turn
-    
-        scaled_score = score / 100  # Scale the score to pawns
-    
-        # Apply more gradual exponential scaling
-        def gradual_exponential_scale(score):
-            if score >= 0:
-                return 1 - math.exp(-score / 3)  # Adjust the divisor to control scaling
-            else:
-                return -1 + math.exp(score / 3)  # Adjust the divisor to control scaling
-    
-        scaled_score = gradual_exponential_scale(scaled_score)
-    
-        # Cap the scaled score to be within the range [-1, 1]
-        if scaled_score > 1:
-            scaled_score = 1
-        elif scaled_score < -1:
-            scaled_score = -1
-    
-        # Calculate percentages of advantage for white and black
-        white_percentage = (scaled_score + 1) * 50
-        black_percentage = 100 - white_percentage
-    
-        # Clear existing bar
-        self.analysis_bar.delete("all")
-    
-        # Draw white and black sections of the bar
-        if self.board_flipped:
-            self.analysis_bar.create_rectangle(
-                0, 0, 20, white_percentage * 4, fill="#FFFFFF", outline=""
-            )
-            self.analysis_bar.create_rectangle(
-                0, white_percentage * 4, 20, 400, fill="#000000", outline=""
-            )
-        else:
-            self.analysis_bar.create_rectangle(
-                0, 400 - white_percentage * 4, 20, 400, fill="#FFFFFF", outline=""
-            )
-            self.analysis_bar.create_rectangle(
-                0, 0, 20, 400 - white_percentage * 4, fill="#000000", outline=""
-            )
-    
-        # Handle mate situation
-        if abs(score) >= 10000:  # Assuming a score of 10000 or more indicates mate
-            if score > 0:
+        try:
+            analysis = self.engine.analyze(self.board)
+            score = analysis["score"]
+        
+            if self.board.turn == chess.BLACK:
+                score = -score  # Invert score if it's black's turn
+        
+            scaled_score = score / 100  # Scale the score to pawns
+        
+            # Apply more gradual exponential scaling
+            def gradual_exponential_scale(score):
+                if score >= 0:
+                    return 1 - math.exp(-score / 3)  # Adjust the divisor to control scaling
+                else:
+                    return -1 + math.exp(score / 3)  # Adjust the divisor to control scaling
+        
+            scaled_score = gradual_exponential_scale(scaled_score)
+        
+            # Cap the scaled score to be within the range [-1, 1]
+            if scaled_score > 1:
+                scaled_score = 1
+            elif scaled_score < -1:
+                scaled_score = -1
+        
+            # Calculate percentages of advantage for white and black
+            white_percentage = (scaled_score + 1) * 50
+            black_percentage = 100 - white_percentage
+        
+            # Clear existing bar
+            self.analysis_bar.delete("all")
+        
+            # Draw white and black sections of the bar
+            if self.board_flipped:
                 self.analysis_bar.create_rectangle(
-                    0, 0, 20, 400, fill="#FFFFFF", outline=""
+                    0, 0, 20, white_percentage * 4, fill="#FFFFFF", outline=""
+                )
+                self.analysis_bar.create_rectangle(
+                    0, white_percentage * 4, 20, 400, fill="#000000", outline=""
                 )
             else:
                 self.analysis_bar.create_rectangle(
-                    0, 0, 20, 400, fill="#000000", outline=""
+                    0, 400 - white_percentage * 4, 20, 400, fill="#FFFFFF", outline=""
                 )
-
+                self.analysis_bar.create_rectangle(
+                    0, 0, 20, 400 - white_percentage * 4, fill="#000000", outline=""
+                )
+        
+            # Handle mate situation
+            if abs(score) >= 10000:  # Assuming a score of 10000 or more indicates mate
+                if score > 0:
+                    self.analysis_bar.create_rectangle(
+                        0, 0, 20, 400, fill="#FFFFFF", outline=""
+                    )
+                else:
+                    self.analysis_bar.create_rectangle(
+                        0, 0, 20, 400, fill="#000000", outline=""
+                    )
+        except (chess.IllegalMoveError, chess.engine.EngineError, TimeoutError) as e:
+            print(f"Engine analysis error: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
