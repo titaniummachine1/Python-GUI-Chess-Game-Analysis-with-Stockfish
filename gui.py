@@ -20,54 +20,71 @@ class ChessAnalyzerApp:
         self.selected_square = None
         self.piece_images = self.load_piece_images()
         self.move_stack = []
-        self.setup_gui()
         self.cumulative_score = 0  # Initialize cumulative score
         self.move_gen = MoveGen(self.board)
+        self.board_flipped = False  # Track if the board is flipped
+        self.setup_gui()
+        self.update_analysis_bar()  # Initialize the evaluation bar
 
     def setup_gui(self):
         self.frame = tk.Frame(self.root)
         self.frame.pack(padx=10, pady=10)
 
-        self.board_canvas = tk.Canvas(self.frame, width=400, height=400)
-        self.board_canvas.grid(row=0, column=1, rowspan=8, padx=5)
-
-        self.analysis_area = scrolledtext.ScrolledText(self.frame, width=50, height=20)
-        self.analysis_area.grid(row=0, column=2, rowspan=8, padx=10, pady=5)
-
         self.analysis_bar = tk.Canvas(self.frame, width=20, height=400, bg="#FFFFFF")
         self.analysis_bar.grid(row=0, column=0, rowspan=8, padx=5)
+
+        self.white_drawback_var = tk.StringVar(value="None")
+        self.white_drawback_menu = tk.OptionMenu(
+            self.frame, self.white_drawback_var, "None", "no_diagonal_capture", "king_must_capture", "no_pawn_moves", command=lambda _: self.set_drawback(chess.WHITE)
+        )
+        self.white_drawback_menu.grid(row=9, column=1, columnspan=2, pady=5)
+
+        self.board_canvas = tk.Canvas(self.frame, width=400, height=400)
+        self.board_canvas.grid(row=1, column=1, rowspan=8, padx=5)
+
+        self.black_drawback_var = tk.StringVar(value="None")
+        self.black_drawback_menu = tk.OptionMenu(
+            self.frame, self.black_drawback_var, "None", "no_diagonal_capture", "king_must_capture", "no_pawn_moves", command=lambda _: self.set_drawback(chess.BLACK)
+        )
+        self.black_drawback_menu.grid(row=0, column=1, columnspan=2, pady=5)
+
+        self.analysis_area = scrolledtext.ScrolledText(self.frame, width=50, height=20)
+        self.analysis_area.grid(row=1, column=2, rowspan=8, padx=10, pady=5)
 
         self.load_pgn_button = tk.Button(
             self.frame, text="Load PGN", command=self.load_pgn
         )
-        self.load_pgn_button.grid(row=8, column=1, columnspan=2, pady=5)
+        self.load_pgn_button.grid(row=10, column=1, columnspan=2, pady=5)
 
         self.reset_board_button = tk.Button(
             self.frame, text="Reset Board", command=self.reset_board
         )
-        self.reset_board_button.grid(row=8, column=3, columnspan=2, pady=5)
+        self.reset_board_button.grid(row=10, column=3, columnspan=2, pady=5)
 
-        self.drawback_var = tk.StringVar()
-        self.drawback_menu = tk.OptionMenu(
-            self.frame, self.drawback_var, "None", "no_diagonal_capture", "king_must_capture", "no_pawn_moves", command=self.set_drawback
+        self.flip_board_button = tk.Button(
+            self.frame, text="Flip Board", command=self.flip_board
         )
-        self.drawback_menu.grid(row=8, column=4, columnspan=2, pady=5)
+        self.flip_board_button.grid(row=10, column=5, columnspan=2, pady=5)
 
         self.board_canvas.bind("<Button-1>", self.on_board_click)
 
         self.navigation = Navigation(self.frame, self.next_move, self.prev_move)
-        self.navigation.frame.grid(row=9, column=1, columnspan=4, pady=5)
+        self.navigation.frame.grid(row=11, column=1, columnspan=4, pady=5)
 
         self.move_history = MoveHistory(self.frame)
-        self.move_history.frame.grid(row=0, column=3, rowspan=8, padx=5, pady=5)
+        self.move_history.frame.grid(row=1, column=3, rowspan=8, padx=5, pady=5)
 
         self.refresh_board()
 
-    def set_drawback(self, drawback):
+    def set_drawback(self, color):
         """
-        Set the drawback for the current player.
+        Set the drawback for the specified player.
         """
-        color = self.board.turn
+        if color == chess.WHITE:
+            drawback = self.white_drawback_var.get()
+        else:
+            drawback = self.black_drawback_var.get()
+
         if drawback == "None":
             drawback = None
         self.move_gen.set_drawback(color, drawback)
@@ -104,8 +121,29 @@ class ChessAnalyzerApp:
         self.move_history.update(self.move_stack)
         self.update_analysis_bar()
 
+    def flip_board(self):
+        """
+        Flip the board orientation.
+        """
+        self.board_flipped = not self.board_flipped
+        self.update_drawback_menus()
+        self.refresh_board()
+
+    def update_drawback_menus(self):
+        """
+        Update the position of the drawback menus based on the board orientation.
+        """
+        if self.board_flipped:
+            self.white_drawback_menu.grid(row=0, column=1, columnspan=2, pady=5)
+            self.black_drawback_menu.grid(row=9, column=1, columnspan=2, pady=5)
+        else:
+            self.white_drawback_menu.grid(row=9, column=1, columnspan=2, pady=5)
+            self.black_drawback_menu.grid(row=0, column=1, columnspan=2, pady=5)
+
     def on_board_click(self, event):
         x, y = event.x, event.y
+        if self.board_flipped:
+            x, y = 400 - x, 400 - y
         col = x // 50
         row = 7 - (y // 50)
         square = chess.square(col, row)
@@ -139,6 +177,8 @@ class ChessAnalyzerApp:
         for move in legal_moves:
             if move.from_square == square:
                 col, row = chess.square_file(move.to_square), chess.square_rank(move.to_square)
+                if self.board_flipped:
+                    col, row = 7 - col, 7 - row
                 x1, y1 = col * 50 + 20, (7 - row) * 50 + 20
                 x2, y2 = x1 + 10, y1 + 10
                 self.board_canvas.create_oval(x1, y1, x2, y2, fill="black", outline="", stipple="gray50", tags="highlight")
@@ -167,6 +207,8 @@ class ChessAnalyzerApp:
         self.board_canvas.delete("all")
         for square in chess.SQUARES:
             col, row = chess.square_file(square), chess.square_rank(square)
+            if self.board_flipped:
+                col, row = 7 - col, 7 - row
             x1, y1 = col * 50, (7 - row) * 50
             x2, y2 = x1 + 50, y1 + 50
             color = "#F0D9B5" if (col + row) % 2 == 0 else "#B58863"
@@ -185,6 +227,9 @@ class ChessAnalyzerApp:
     
             from_col, from_row = chess.square_file(from_square), chess.square_rank(from_square)
             to_col, to_row = chess.square_file(to_square), chess.square_rank(to_square)
+            if self.board_flipped:
+                from_col, from_row = 7 - from_col, 7 - from_row
+                to_col, to_row = 7 - to_col, 7 - to_row
     
             from_x1, from_y1 = from_col * 50, (7 - from_row) * 50
             from_x2, from_y2 = from_x1 + 50, from_y1 + 50
@@ -203,6 +248,9 @@ class ChessAnalyzerApp:
     
             from_col, from_row = chess.square_file(from_square), chess.square_rank(from_square)
             to_col, to_row = chess.square_file(to_square), chess.square_rank(to_square)
+            if self.board_flipped:
+                from_col, from_row = 7 - from_col, 7 - from_row
+                to_col, to_row = 7 - to_col, 7 - to_row
     
             from_x1, from_y1 = from_col * 50, (7 - from_row) * 50
             from_x2, from_y2 = from_x1 + 50, from_y1 + 50
@@ -215,12 +263,16 @@ class ChessAnalyzerApp:
         # Highlight the selected square (if any)
         if self.selected_square is not None:
             col, row = chess.square_file(self.selected_square), chess.square_rank(self.selected_square)
+            if self.board_flipped:
+                col, row = 7 - col, 7 - row
             x1, y1 = col * 50, (7 - row) * 50
             x2, y2 = x1 + 50, y1 + 50
             self.board_canvas.create_rectangle(
                 x1, y1, x2, y2, fill="#FFFF00", outline="", stipple="gray50"
             )
-
+        
+        # Update the analysis bar
+        self.update_analysis_bar()
 
     def load_piece_images(self):
         piece_symbols = {
@@ -297,12 +349,20 @@ class ChessAnalyzerApp:
         self.analysis_bar.delete("all")
     
         # Draw white and black sections of the bar
-        self.analysis_bar.create_rectangle(
-            0, 400 - white_percentage * 4, 20, 400, fill="#FFFFFF", outline=""
-        )
-        self.analysis_bar.create_rectangle(
-            0, 0, 20, 400 - white_percentage * 4, fill="#000000", outline=""
-        )
+        if self.board_flipped:
+            self.analysis_bar.create_rectangle(
+                0, 0, 20, white_percentage * 4, fill="#FFFFFF", outline=""
+            )
+            self.analysis_bar.create_rectangle(
+                0, white_percentage * 4, 20, 400, fill="#000000", outline=""
+            )
+        else:
+            self.analysis_bar.create_rectangle(
+                0, 400 - white_percentage * 4, 20, 400, fill="#FFFFFF", outline=""
+            )
+            self.analysis_bar.create_rectangle(
+                0, 0, 20, 400 - white_percentage * 4, fill="#000000", outline=""
+            )
     
         # Handle mate situation
         if abs(score) >= 10000:  # Assuming a score of 10000 or more indicates mate
