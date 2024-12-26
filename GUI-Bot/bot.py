@@ -159,4 +159,4 @@ if __name__ == "__main__":
     bot = ChessBot(root)
     root.protocol("WM_DELETE_WINDOW", bot.close)
     root.mainloop()
-s
+
