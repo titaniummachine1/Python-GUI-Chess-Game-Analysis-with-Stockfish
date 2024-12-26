@@ -3,11 +3,11 @@ from tkinter import filedialog, messagebox, scrolledtext
 import chess
 import chess.pgn
 from PIL import Image, ImageTk
-import os
 from engine import ChessEngine
 from move_history import MoveHistory
 from navigation import Navigation
 import math
+from move_gen import MoveGen
 
 
 class ChessAnalyzerApp:
@@ -22,6 +22,7 @@ class ChessAnalyzerApp:
         self.move_stack = []
         self.setup_gui()
         self.cumulative_score = 0  # Initialize cumulative score
+        self.move_gen = MoveGen(self.board)
 
     def setup_gui(self):
         self.frame = tk.Frame(self.root)
@@ -46,6 +47,12 @@ class ChessAnalyzerApp:
         )
         self.reset_board_button.grid(row=8, column=3, columnspan=2, pady=5)
 
+        self.drawback_var = tk.StringVar()
+        self.drawback_menu = tk.OptionMenu(
+            self.frame, self.drawback_var, "None", "no_diagonal_capture", "king_must_capture", "no_pawn_moves", command=self.set_drawback
+        )
+        self.drawback_menu.grid(row=8, column=4, columnspan=2, pady=5)
+
         self.board_canvas.bind("<Button-1>", self.on_board_click)
 
         self.navigation = Navigation(self.frame, self.next_move, self.prev_move)
@@ -54,6 +61,16 @@ class ChessAnalyzerApp:
         self.move_history = MoveHistory(self.frame)
         self.move_history.frame.grid(row=0, column=3, rowspan=8, padx=5, pady=5)
 
+        self.refresh_board()
+
+    def set_drawback(self, drawback):
+        """
+        Set the drawback for the current player.
+        """
+        color = self.board.turn
+        if drawback == "None":
+            drawback = None
+        self.move_gen.set_drawback(color, drawback)
         self.refresh_board()
 
     def load_pgn(self):
@@ -97,21 +114,39 @@ class ChessAnalyzerApp:
         if self.selected_square is None:
             if self.board.piece_at(square):
                 self.selected_square = square
+                self.highlight_legal_moves(square)
         else:
-            if move in self.board.legal_moves:
+            if self.move_gen.is_custom_legal_move(move):
                 self.board.push(move)
                 self.selected_square = None  # Deselect after a valid move
                 self.analyze_current_position()  # Update analysis
                 self.move_history.update(self.board.move_stack)  # Update move history
                 self.update_analysis_bar()  # Update analysis bar
+                if self.move_gen.is_game_over():
+                    self.handle_game_over()
             else:
                 if self.board.piece_at(square):
                     self.selected_square = square
+                    self.highlight_legal_moves(square)
                 else:
                     self.selected_square = None
     
         self.refresh_board()  # Refresh to show updates
 
+    def highlight_legal_moves(self, square):
+        self.board_canvas.delete("highlight")
+        legal_moves = self.move_gen.get_custom_legal_moves()
+        for move in legal_moves:
+            if move.from_square == square:
+                col, row = chess.square_file(move.to_square), chess.square_rank(move.to_square)
+                x1, y1 = col * 50 + 20, (7 - row) * 50 + 20
+                x2, y2 = x1 + 10, y1 + 10
+                self.board_canvas.create_oval(x1, y1, x2, y2, fill="black", outline="", stipple="gray50", tags="highlight")
+
+    def handle_game_over(self):
+        winner = "White" if self.board.turn == chess.BLACK else "Black"
+        messagebox.showinfo("Game Over", f"{winner} wins!")
+        self.reset_board()
 
     def analyze_current_position(self):
         analysis = self.engine.analyze(self.board)
