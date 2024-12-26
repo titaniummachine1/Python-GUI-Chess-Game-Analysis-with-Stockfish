@@ -10,7 +10,6 @@ import math
 from move_gen import MoveGen
 import chess.engine  # Import chess.engine to catch engine errors
 
-
 class ChessAnalyzerApp:
     def __init__(self, root):
         self.root = root
@@ -72,7 +71,7 @@ class ChessAnalyzerApp:
         self.navigation = Navigation(self.frame, self.next_move, self.prev_move)
         self.navigation.frame.grid(row=11, column=1, columnspan=4, pady=5)
 
-        self.move_history = MoveHistory(self.frame)
+        self.move_history = MoveHistory(self.frame, self.board)
         self.move_history.frame.grid(row=1, column=3, rowspan=8, padx=5, pady=5)
 
         self.refresh_board()
@@ -99,18 +98,12 @@ class ChessAnalyzerApp:
             return
 
         with open(file_path) as f:
-            game = chess.pgn.read_game(f)
-            if game:
-                self.board = game.board()
-                self.move_stack = list(game.mainline_moves())
-            else:
-                messagebox.showerror("Error", "Failed to load PGN file.")
-                return
+            pgn_text = f.read()
+            self.move_history.load_pgn(pgn_text)
 
         self.analysis_area.delete(1.0, tk.END)
         self.refresh_board()
         self.analyze_current_position()
-        self.move_history.update(self.move_stack)
         self.update_analysis_bar()
 
     def reset_board(self):
@@ -155,7 +148,7 @@ class ChessAnalyzerApp:
                 self.selected_square = square
                 self.highlight_legal_moves(square)
         else:
-            if self.move_gen.is_legal_drawback_move(move):
+            if self.move_gen.is_custom_legal_move(move):  # Corrected method name
                 self.board.push(move)
                 self.selected_square = None  # Deselect after a valid move
                 self.analyze_current_position()  # Update analysis

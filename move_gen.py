@@ -3,8 +3,8 @@ import chess
 class MoveGen:
     def __init__(self, board):
         self.board = board
-        self.white_drawback = None  # Single drawback for white
-        self.black_drawback = None  # Single drawback for black
+        self.white_drawback = None  # Default drawback for white
+        self.black_drawback = None  # Default drawback for black
         self.drawback_functions = {
             "no_diagonal_capture": self.no_diagonal_capture,
             "king_must_capture": self.king_must_capture,
@@ -30,9 +30,9 @@ class MoveGen:
 
     def get_legal_moves(self):
         """
-        Get standard legal moves.
+        Get pseudo-legal moves, ignoring checks.
         """
-        return list(self.board.legal_moves)
+        return list(self.board.pseudo_legal_moves)
 
     def get_custom_legal_moves(self):
         """
@@ -58,7 +58,14 @@ class MoveGen:
         """
         filtered_moves = []
         for move in legal_moves:
-            if self.board.piece_at(move.to_square) and chess.square_file(move.from_square) == chess.square_file(move.to_square):
+            if self.board.piece_at(move.to_square):
+                from_file = chess.square_file(move.from_square)
+                to_file = chess.square_file(move.to_square)
+                from_rank = chess.square_rank(move.from_square)
+                to_rank = chess.square_rank(move.to_square)
+                if from_file == to_file or from_rank == to_rank:
+                    filtered_moves.append(move)
+            else:
                 filtered_moves.append(move)
         return filtered_moves
 
@@ -89,7 +96,7 @@ class MoveGen:
         return False  # Draw does not exist in this variant
 
     def is_game_over(self):
-        return self.can_capture_king() or not self.get_custom_legal_moves()
+        return not self.get_custom_legal_moves() or not self.king_on_board()
 
     def can_capture_king(self):
         """
@@ -102,3 +109,10 @@ class MoveGen:
                 return True
             self.board.pop()
         return False
+
+    def king_on_board(self):
+        """
+        Check if the current player's king is still on the board.
+        """
+        king_square = self.board.king(self.board.turn)
+        return king_square is not None
